@@ -14,7 +14,6 @@ SatFlow is a Bitcoin-native yield routing protocol built on Stacks that enables 
 | Blockchain | Stacks (Clarity smart contracts) |
 | Wallet | Hiro Wallet via `@stacks/connect` |
 | Charts | Recharts |
-| Fonts | Syne + DM Sans + DM Mono |
 
 ---
 

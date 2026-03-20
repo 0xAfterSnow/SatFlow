@@ -11,24 +11,18 @@ import {
   PostConditionMode,
 } from '@stacks/transactions';
 
-// ─── Network config ───────────────────────────────────────────────
 const NETWORK = STACKS_TESTNET;
 const API_BASE_URL = 'https://api.testnet.hiro.so';
 
-// ─── Contract addresses ───────────────────────────────────────────
 const CONTRACT_ADDRESS = 'ST1X96N4Y6TNRRMHWA9G252P5CCMZECGTF82FR086';
 const VAULT_CONTRACT = 'satflow-vault';
 const ROUTER_CONTRACT = 'satflow-router';
 const STRATEGY_CONTRACT = 'satflow-strategy';
 
-// sBTC SIP-010 token — already deployed on Stacks testnet by Trust Machines / Hiro
-// No need to deploy your own — just reference the existing contract
 const SBTC_TOKEN_ADDRESS = 'ST1F7QA2MDF17S807EPA36TSS8AMEFY4KA9TVGWXT';
 const SBTC_TOKEN_NAME = 'sbtc-token';
-// sBTC uses 8 decimal places (satoshis): 1 sBTC = 100,000,000 sats
 const SATS_PER_BTC = 100_000_000;
 
-// ─── Strategy definitions ─────────────────────────────────────────
 export const STRATEGIES = {
   conservative: {
     id: 'conservative',
@@ -153,7 +147,6 @@ function accrueYield(position: UserPosition, btcPrice: number): UserPosition {
   };
 }
 
-// ─── Provider ─────────────────────────────────────────────────────
 const POSITION_STORAGE_KEY = 'satflow-position';
 
 function savePosition(pos: UserPosition | null) {
@@ -199,7 +192,6 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [btcPrice] = useState(MOCK_BTC_PRICE);
   const yieldTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Check connection on mount ──
   useEffect(() => {
     if (isConnected()) {
       setConnected(true);
@@ -210,7 +202,6 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   }, []);
 
-  // ── Fetch balance + on-chain position when address is known ──
   useEffect(() => {
     if (address) {
       fetchBalance();
@@ -218,15 +209,14 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   }, [address]);
 
-  // ── Real-time yield accrual timer ──
   useEffect(() => {
     if (position) {
       yieldTimerRef.current = setInterval(() => {
         setPosition(prev => prev ? accrueYield(prev, btcPrice) : null);
-        // Snapshot every 30s for history chart
+        // Snapshot every 1m for history chart
         setYieldHistory(prev => {
           const now = Date.now();
-          if (prev.length === 0 || now - prev[prev.length - 1].timestamp > 30_000) {
+          if (prev.length === 0 || now - prev[prev.length - 1].timestamp > 60_000) {
             return [...prev, {
               timestamp: now,
               totalValue: 0, // will be computed in render
@@ -268,7 +258,6 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
       console.log('[SatFlow] raw result:', JSON.stringify(result, (_, v) =>
         typeof v === 'bigint' ? v.toString() : v, 2));
 
-      // Unwrap ResponseOk if present (string-based type in newer SDK)
       const maybeUnwrapped = (result as any).type === 'ok' ? (result as any).value : result;
 
       // Handle None
@@ -284,12 +273,10 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
         return;
       }
 
-      // ✅ New SDK: value.value is the tuple, fields are in value.value directly
       const tupleData: Record<string, any> = (maybeUnwrapped as any).value?.value ?? {};
 
       console.log('[SatFlow] tupleData:', tupleData);
 
-      // ✅ New SDK: is-active is {type: 'true'} or {type: 'false'}
       const isActive: boolean = tupleData['is-active']?.type === 'true';
 
       if (!isActive) {
@@ -298,11 +285,9 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
         return;
       }
 
-      // ✅ New SDK: uint fields have .value as bigint
       const sbtcSats: number = Number(tupleData['sbtc-deposited']?.value ?? 0n);
       const depositedBtc = sbtcSats / SATS_PER_BTC;
 
-      // ✅ New SDK: ascii fields have .value (not .data)
       const strategyRaw: string = tupleData['strategy']?.value ?? 'balanced';
       const strategyId: StrategyId = (strategyRaw in STRATEGIES)
         ? strategyRaw as StrategyId
@@ -312,7 +297,8 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       const currentBlock = await fetchCurrentBlockHeight();
       const blocksElapsed = Math.max(0, currentBlock - depositedAtBlock);
-      const depositTimestamp = Date.now() - blocksElapsed * 10_000;
+      const BLOCK_TIME_MS = 30_000;
+      const depositTimestamp = Date.now() - blocksElapsed * BLOCK_TIME_MS;
 
       const strategy = STRATEGIES[strategyId];
       const totalUsd = depositedBtc * MOCK_BTC_PRICE;
@@ -385,7 +371,6 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
     setYieldHistory([]);
   }, []);
 
-  // ── Deposit: calls vault.clar → router.clar on-chain ─────────────
   const deposit = useCallback(async (btcAmount: number, strategyId: StrategyId): Promise<void> => {
     if (!address) throw new Error('Wallet not connected');
 
@@ -440,7 +425,6 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
     });
   }, [address, btcPrice]);
 
-  // ── Rebalance: calls router.clar on-chain ─────────────────────────
   const rebalance = useCallback(async (newStrategyId: StrategyId): Promise<void> => {
     if (!address || !position) throw new Error('No active position');
 
@@ -491,7 +475,6 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
     });
   }, [address, position, btcPrice]);
 
-  // ── Withdraw: calls vault.clar on-chain ───────────────────────────
   const withdraw = useCallback(async (): Promise<{ deposit: number; yield: number; total: number } | null> => {
     if (!address || !position) throw new Error('No active position');
 

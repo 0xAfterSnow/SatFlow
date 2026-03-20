@@ -2,14 +2,14 @@
 ;; Manages allocation logic, strategy selection, and rebalancing
 ;; Core capital routing engine of SatFlow protocol
 
-;; ─── Error constants ───────────────────────────────────────────────────────────
+;; Error constants 
 (define-constant ERR-INVALID-STRATEGY (err u300))
 (define-constant ERR-NO-POSITION (err u301))
 (define-constant ERR-SAME-STRATEGY (err u302))
 (define-constant ERR-UNAUTHORIZED (err u303))
 (define-constant ERR-INVALID-AMOUNT (err u304))
 
-;; ─── Strategy allocation ratios (basis points: 10000 = 100%) ──────────────────
+;; Strategy allocation ratios (basis points: 10000 = 100%)
 ;; Conservative: 20% sBTC, 80% USDCx
 (define-constant CONSERVATIVE-SBTC-BPS u2000)
 (define-constant CONSERVATIVE-USDCX-BPS u8000)
@@ -24,7 +24,7 @@
 
 (define-constant BPS-DENOMINATOR u10000)
 
-;; ─── Data maps ─────────────────────────────────────────────────────────────────
+;; Data maps
 (define-map UserAllocation
   { user: principal }
   {
@@ -41,7 +41,7 @@
 
 (define-data-var rebalance-count uint u0)
 
-;; ─── Read-only helpers ─────────────────────────────────────────────────────────
+;; Read-only helpers
 (define-read-only (get-allocation (user principal))
   (map-get? UserAllocation { user: user })
 )
@@ -66,7 +66,7 @@
       sbtc-amount: (/ (* amount (get sbtc-bps ratios)) BPS-DENOMINATOR),
       usdcx-amount: (/ (* amount (get usdcx-bps ratios)) BPS-DENOMINATOR)
     })
-    err-val err-val
+    err-val (err err-val)
   )
 )
 
@@ -74,7 +74,7 @@
   (var-get rebalance-count)
 )
 
-;; ─── Public functions ──────────────────────────────────────────────────────────
+;; Public functions
 
 ;; set-allocation: called after deposit to initialize routing
 (define-public (set-allocation

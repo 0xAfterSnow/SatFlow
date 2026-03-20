@@ -1,13 +1,13 @@
 ;; SatFlow Strategy Contract
-;; Mock yield simulation layer — returns APY values and computes expected yield
+;; Mock yield simulation layer returns APY values and computes expected yield
 ;; In production: integrates with Arkadiko, Zest, or other Stacks DeFi protocols
 
-;; ─── Error constants ───────────────────────────────────────────────────────────
+;; Error constants 
 (define-constant ERR-INVALID-STRATEGY (err u400))
 (define-constant ERR-INVALID-AMOUNT (err u401))
 (define-constant ERR-NO-HISTORY (err u402))
 
-;; ─── APY constants (basis points: 10000 = 100%) ───────────────────────────────
+;; APY constants (basis points: 10000 = 100%)
 ;; Conservative strategy APYs
 (define-constant CONSERVATIVE-SBTC-APY-MIN u800)   ;; 8%
 (define-constant CONSERVATIVE-SBTC-APY-MAX u1000)  ;; 10%
@@ -30,7 +30,7 @@
 ;; Blocks per year (Stacks ~10min blocks)
 (define-constant BLOCKS-PER-YEAR u52560)
 
-;; ─── Data maps ─────────────────────────────────────────────────────────────────
+;; Data maps
 (define-map YieldAccrued
   { user: principal }
   {
@@ -42,7 +42,7 @@
   }
 )
 
-;; ─── Read-only helpers ─────────────────────────────────────────────────────────
+;; Read-only helpers
 (define-read-only (get-strategy-apy (strategy (string-ascii 20)))
   (if (is-eq strategy "conservative")
     (ok {
@@ -97,7 +97,7 @@
           u0)
       })
     )
-    err-val err-val
+    err-val (err err-val)
   )
 )
 
@@ -124,7 +124,7 @@
         blocks-elapsed: blocks
       })
     )
-    err-val err-val
+    err-val (err err-val)
   )
 )
 
@@ -132,7 +132,7 @@
   (map-get? YieldAccrued { user: user })
 )
 
-;; ─── Public functions ──────────────────────────────────────────────────────────
+;; Public functions
 
 ;; snapshot-yield: records current yield state on-chain (called periodically)
 (define-public (snapshot-yield
@@ -156,7 +156,7 @@
       )
       (ok (get total-yield yield-data))
     )
-    err-val err-val
+    err-val (err err-val)
   )
 )
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSatFlow } from '../context/SatFlowContext';
+import { useTheme } from '../context/ThemeContext';
 
 interface NavbarProps {
   currentPage: string;
@@ -8,6 +9,7 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate }) => {
   const { connected, address, balance, connectWallet, disconnectWallet, formatAddress, isLoading } = useSatFlow();
+  const { theme, toggleTheme } = useTheme();
 
   return (
     <nav style={{
@@ -22,7 +24,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate }) => {
       justifyContent: 'space-between',
       padding: '0 32px',
       borderBottom: '1px solid var(--border)',
-      background: 'rgba(10, 10, 11, 0.85)',
+      background: 'var(--bg-nav)',
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
     }}>
@@ -86,6 +88,35 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate }) => {
 
       {/* Wallet */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* Theme Toggle */}
+        <button
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '16px',
+            cursor: 'pointer',
+            transition: 'var(--transition)',
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-gold)';
+            (e.currentTarget as HTMLButtonElement).style.background = 'var(--accent-gold-dim)';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
+            (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-card)';
+          }}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
         {connected && balance !== null && (
           <div style={{
             fontFamily: 'var(--font-mono)',

@@ -1,6 +1,7 @@
 ;; SatFlow Vault Contract
 ;; Stores user deposits, tracks balances, handles withdrawals
-;; Deployed on Stacks — BTC/sBTC locked here
+;; Deployed on Stacks — sBTC is the deposit token (UI label shows BTC, backed 1:1)
+;; Unit precision: satoshis — 1 sBTC = 100,000,000 sats
 
 ;; ─── Error constants ───────────────────────────────────────────────────────────
 (define-constant ERR-NO-DEPOSIT (err u200))
@@ -10,7 +11,8 @@
 (define-constant ERR-ZERO-BALANCE (err u204))
 
 ;; ─── Constants ─────────────────────────────────────────────────────────────────
-(define-constant MIN-DEPOSIT u100000)  ;; 0.1 STX minimum (proxy for sBTC in testnet)
+;; MIN-DEPOSIT: 1,000,000 sats = 0.01 sBTC minimum
+(define-constant MIN-DEPOSIT u1000000)
 (define-constant CONTRACT-OWNER tx-sender)
 
 ;; ─── Data maps ─────────────────────────────────────────────────────────────────

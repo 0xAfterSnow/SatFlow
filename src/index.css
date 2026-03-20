@@ -33,6 +33,31 @@
   --shadow-card: 0 1px 3px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3);
   --shadow-glow-gold: 0 0 30px rgba(245, 166, 35, 0.15);
   --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --bg-nav: rgba(10, 10, 11, 0.85);
+}
+
+[data-theme="light"] {
+  --bg-primary: #f5f4ef;
+  --bg-secondary: #eeede6;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f9f8f4;
+  --border: #dddbd0;
+  --border-light: #cac8bc;
+  --text-primary: #1a1a20;
+  --text-secondary: #5c5c70;
+  --text-muted: #9898a8;
+  --accent-gold: #d4880a;
+  --accent-gold-dim: rgba(212, 136, 10, 0.10);
+  --accent-gold-mid: rgba(212, 136, 10, 0.22);
+  --accent-blue: #2563eb;
+  --accent-blue-dim: rgba(37, 99, 235, 0.08);
+  --accent-green: #16a35a;
+  --accent-green-dim: rgba(22, 163, 90, 0.10);
+  --accent-red: #dc2626;
+  --accent-red-dim: rgba(220, 38, 38, 0.08);
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.06);
+  --shadow-glow-gold: 0 0 24px rgba(212, 136, 10, 0.10);
+  --bg-nav: rgba(245, 244, 239, 0.88);
 }
 
 html, body {

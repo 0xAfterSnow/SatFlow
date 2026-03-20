@@ -6,6 +6,7 @@ import {
   cvToJSON,
   uintCV,
   principalCV,
+  contractPrincipalCV,
   stringAsciiCV,
   PostConditionMode,
 } from '@stacks/transactions';
@@ -15,11 +16,17 @@ const NETWORK = STACKS_TESTNET;
 const API_BASE_URL = 'https://api.testnet.hiro.so';
 
 // ─── Contract addresses ───────────────────────────────────────────
-// Replace with your deployed contract addresses after deployment
-const CONTRACT_ADDRESS = 'ST271YXGFQ29048X78A0WCVYRVG8KWHT0R976DXEE';
+const CONTRACT_ADDRESS = 'ST1X96N4Y6TNRRMHWA9G252P5CCMZECGTF82FR086';
 const VAULT_CONTRACT = 'satflow-vault';
 const ROUTER_CONTRACT = 'satflow-router';
 const STRATEGY_CONTRACT = 'satflow-strategy';
+
+// sBTC SIP-010 token — already deployed on Stacks testnet by Trust Machines / Hiro
+// No need to deploy your own — just reference the existing contract
+const SBTC_TOKEN_ADDRESS = 'ST1F7QA2MDF17S807EPA36TSS8AMEFY4KA9TVGWXT';
+const SBTC_TOKEN_NAME = 'sbtc-token';
+// sBTC uses 8 decimal places (satoshis): 1 sBTC = 100,000,000 sats
+const SATS_PER_BTC = 100_000_000;
 
 // ─── Strategy definitions ─────────────────────────────────────────
 export const STRATEGIES = {
@@ -147,13 +154,47 @@ function accrueYield(position: UserPosition, btcPrice: number): UserPosition {
 }
 
 // ─── Provider ─────────────────────────────────────────────────────
+const POSITION_STORAGE_KEY = 'satflow-position';
+
+function savePosition(pos: UserPosition | null) {
+  try {
+    if (pos) {
+      localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(pos));
+    } else {
+      localStorage.removeItem(POSITION_STORAGE_KEY);
+    }
+  } catch { /* ignore */ }
+}
+
+function loadPosition(): UserPosition | null {
+  try {
+    const raw = localStorage.getItem(POSITION_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as UserPosition;
+  } catch {
+    return null;
+  }
+}
+
+// Fetch current Stacks block height (best-effort; falls back to 0)
+async function fetchCurrentBlockHeight(): Promise<number> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/v2/info`);
+    const data = await res.json();
+    return data.stacks_tip_height ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [connected, setConnected] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [position, setPosition] = useState<UserPosition | null>(null);
+  // Seed from localStorage for instant render; will be overridden by on-chain truth
+  const [position, setPosition] = useState<UserPosition | null>(loadPosition);
   const [yieldHistory, setYieldHistory] = useState<YieldSnapshot[]>([]);
   const [btcPrice] = useState(MOCK_BTC_PRICE);
   const yieldTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -169,9 +210,12 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   }, []);
 
-  // ── Fetch balance on address change ──
+  // ── Fetch balance + on-chain position when address is known ──
   useEffect(() => {
-    if (address) fetchBalance();
+    if (address) {
+      fetchBalance();
+      fetchPositionFromChain(address);
+    }
   }, [address]);
 
   // ── Real-time yield accrual timer ──
@@ -205,11 +249,108 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
       const data = await res.json();
       setBalance(parseInt(data.balance || '0') / 1_000_000);
     } catch {
-      // Silently fail; show 0
       setBalance(0);
     }
   }, [address]);
 
+  // ── Read position from chain — the authoritative source of truth ──
+  const fetchPositionFromChain = useCallback(async (userAddress: string) => {
+    try {
+      const result = await fetchCallReadOnlyFunction({
+        contractAddress: CONTRACT_ADDRESS,
+        contractName: VAULT_CONTRACT,
+        functionName: 'get-vault',
+        functionArgs: [principalCV(userAddress)],
+        network: NETWORK,
+        senderAddress: userAddress,
+      });
+
+      console.log('[SatFlow] raw result:', JSON.stringify(result, (_, v) =>
+        typeof v === 'bigint' ? v.toString() : v, 2));
+
+      // Unwrap ResponseOk if present (string-based type in newer SDK)
+      const maybeUnwrapped = (result as any).type === 'ok' ? (result as any).value : result;
+
+      // Handle None
+      if ((maybeUnwrapped as any).type === 'none') {
+        savePosition(null);
+        setPosition(null);
+        return;
+      }
+
+      // Must be Some
+      if ((maybeUnwrapped as any).type !== 'some') {
+        console.warn('[SatFlow] Unexpected type:', (maybeUnwrapped as any).type);
+        return;
+      }
+
+      // ✅ New SDK: value.value is the tuple, fields are in value.value directly
+      const tupleData: Record<string, any> = (maybeUnwrapped as any).value?.value ?? {};
+
+      console.log('[SatFlow] tupleData:', tupleData);
+
+      // ✅ New SDK: is-active is {type: 'true'} or {type: 'false'}
+      const isActive: boolean = tupleData['is-active']?.type === 'true';
+
+      if (!isActive) {
+        savePosition(null);
+        setPosition(null);
+        return;
+      }
+
+      // ✅ New SDK: uint fields have .value as bigint
+      const sbtcSats: number = Number(tupleData['sbtc-deposited']?.value ?? 0n);
+      const depositedBtc = sbtcSats / SATS_PER_BTC;
+
+      // ✅ New SDK: ascii fields have .value (not .data)
+      const strategyRaw: string = tupleData['strategy']?.value ?? 'balanced';
+      const strategyId: StrategyId = (strategyRaw in STRATEGIES)
+        ? strategyRaw as StrategyId
+        : 'balanced';
+
+      const depositedAtBlock: number = Number(tupleData['deposited-at']?.value ?? 0n);
+
+      const currentBlock = await fetchCurrentBlockHeight();
+      const blocksElapsed = Math.max(0, currentBlock - depositedAtBlock);
+      const depositTimestamp = Date.now() - blocksElapsed * 10_000;
+
+      const strategy = STRATEGIES[strategyId];
+      const totalUsd = depositedBtc * MOCK_BTC_PRICE;
+
+      const usdcxOnChain = Number(tupleData['usdcx-equivalent']?.value ?? 0n);
+      const sbtcAlloc = (strategy.sbtcPct / 100) * depositedBtc;
+      const usdcxAlloc = usdcxOnChain > 0
+        ? usdcxOnChain / 1_000_000
+        : (strategy.usdcxPct / 100) * totalUsd;
+
+      const onChainPosition: UserPosition = {
+        depositedBtc,
+        depositedSbtc: depositedBtc,
+        strategyId,
+        sbtcAllocation: sbtcAlloc,
+        usdcxAllocation: usdcxAlloc,
+        yieldEarned: 0,
+        sbtcYield: 0,
+        usdcxYield: 0,
+        depositTimestamp,
+        currentApy: 0,
+        btcPriceAtDeposit: MOCK_BTC_PRICE,
+      };
+
+      savePosition(onChainPosition);
+      setPosition(onChainPosition);
+      setYieldHistory([{
+        timestamp: depositTimestamp,
+        totalValue: totalUsd,
+        yieldEarned: 0,
+      }]);
+
+      console.log('[SatFlow] position loaded from chain:', onChainPosition);
+
+    } catch (err) {
+      console.warn('[SatFlow] fetchPositionFromChain failed:', err);
+    }
+  }, []);
   const connectWallet = async () => {
     try {
       setIsLoading(true);
@@ -234,7 +375,7 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
     try {
       localStorage.removeItem('stacks-session');
       localStorage.removeItem('blockstack-session');
-      localStorage.removeItem('satflow-position');
+      savePosition(null);
     } catch { /* ignore */ }
     setConnected(false);
     setAddress(null);
@@ -249,7 +390,11 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (!address) throw new Error('Wallet not connected');
 
     const strategy = STRATEGIES[strategyId];
-    const amountInMicroSTX = Math.floor(btcAmount * 1_000_000);
+    // sBTC uses satoshi precision: 1 BTC = 100,000,000 sats
+    const amountInSats = Math.floor(btcAmount * SATS_PER_BTC);
+
+    // The vault accepts sBTC as a SIP-010 trait argument
+    const sbtcTokenCV = contractPrincipalCV(SBTC_TOKEN_ADDRESS, SBTC_TOKEN_NAME);
 
     return new Promise((resolve, reject) => {
       openContractCall({
@@ -257,10 +402,13 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
         contractName: VAULT_CONTRACT,
         functionName: 'deposit',
         functionArgs: [
-          uintCV(amountInMicroSTX),
+          uintCV(amountInSats),
           stringAsciiCV(strategyId),
+          sbtcTokenCV,
         ],
         network: NETWORK,
+        // Allow mode: testnet sBTC mock returns ok without moving tokens,
+        // so Deny mode post-conditions always fail (0 moved vs N expected).
         postConditionMode: PostConditionMode.Allow,
         postConditions: [],
         onFinish: () => {
@@ -282,6 +430,7 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
             currentApy: 0,
             btcPriceAtDeposit: btcPrice,
           };
+          savePosition(newPosition);
           setPosition(newPosition);
           setYieldHistory([{ timestamp: Date.now(), totalValue: totalUsd, yieldEarned: 0 }]);
           resolve();
@@ -299,24 +448,45 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
       openContractCall({
         contractAddress: CONTRACT_ADDRESS,
         contractName: ROUTER_CONTRACT,
-        functionName: 'rebalance',
-        functionArgs: [stringAsciiCV(newStrategyId)],
+        functionName: 'set-allocation',         // ← seed the router first
+        functionArgs: [
+          principalCV(address),
+          uintCV(Math.floor(position.depositedBtc * SATS_PER_BTC)),
+          stringAsciiCV(position.strategyId),   // current strategy to initialize
+        ],
         network: NETWORK,
         postConditionMode: PostConditionMode.Allow,
         postConditions: [],
         onFinish: () => {
-          const strategy = STRATEGIES[newStrategyId];
-          const totalBtc = position.depositedSbtc;
-          const totalUsd = totalBtc * btcPrice;
-          setPosition(prev => prev ? {
-            ...prev,
-            strategyId: newStrategyId,
-            sbtcAllocation: (strategy.sbtcPct / 100) * totalBtc,
-            usdcxAllocation: (strategy.usdcxPct / 100) * totalUsd,
-          } : null);
-          resolve();
+          // Now call the actual rebalance
+          openContractCall({
+            contractAddress: CONTRACT_ADDRESS,
+            contractName: ROUTER_CONTRACT,
+            functionName: 'rebalance',
+            functionArgs: [stringAsciiCV(newStrategyId)],
+            network: NETWORK,
+            postConditionMode: PostConditionMode.Allow,
+            postConditions: [],
+            onFinish: () => {
+              const strategy = STRATEGIES[newStrategyId];
+              const totalBtc = position.depositedSbtc;
+              const totalUsd = totalBtc * btcPrice;
+              setPosition(prev => {
+                const updated = prev ? {
+                  ...prev,
+                  strategyId: newStrategyId,
+                  sbtcAllocation: (strategy.sbtcPct / 100) * totalBtc,
+                  usdcxAllocation: (strategy.usdcxPct / 100) * totalUsd,
+                } : null;
+                savePosition(updated);
+                return updated;
+              });
+              resolve();
+            },
+            onCancel: () => reject(new Error('Rebalance cancelled')),
+          });
         },
-        onCancel: () => reject(new Error('Transaction cancelled')),
+        onCancel: () => reject(new Error('set-allocation cancelled')),
       });
     });
   }, [address, position, btcPrice]);
@@ -332,15 +502,19 @@ export const SatFlowProvider: React.FC<{ children: ReactNode }> = ({ children })
     };
 
     return new Promise((resolve, reject) => {
+      const sbtcTokenCV = contractPrincipalCV(SBTC_TOKEN_ADDRESS, SBTC_TOKEN_NAME);
       openContractCall({
         contractAddress: CONTRACT_ADDRESS,
         contractName: VAULT_CONTRACT,
         functionName: 'withdraw',
-        functionArgs: [],
+        functionArgs: [
+          sbtcTokenCV,           // <-- sBTC token contract (SIP-010 trait)
+        ],
         network: NETWORK,
         postConditionMode: PostConditionMode.Allow,
         postConditions: [],
         onFinish: () => {
+          savePosition(null);
           setPosition(null);
           setYieldHistory([]);
           fetchBalance();

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { SatFlowProvider } from './context/SatFlowContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { Navbar } from './components/Navbar';
 import { LandingPage } from './pages/LandingPage';
 import { DepositPage } from './pages/DepositPage';
@@ -27,9 +28,11 @@ function AppContent() {
 
 function App() {
   return (
-    <SatFlowProvider>
-      <AppContent />
-    </SatFlowProvider>
+    <ThemeProvider>
+      <SatFlowProvider>
+        <AppContent />
+      </SatFlowProvider>
+    </ThemeProvider>
   );
 }
 
